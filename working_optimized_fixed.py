@@ -1,38 +1,64 @@
-# Working Optimized Fixed
+import cv2
+import numpy as np
+import tensorflow as tf
 
-# Constants
-INITIAL_SKIP_FRAMES = 15  # Reduced from 60
-MERGE_GAP = 6.0  # Increased from 3.0
-MIN_EVENT_DURATION = 1.5  # Reduced from 2.0
+class Config:
+    initial_skip = 15
+    merge_gap = 6.0
+    min_event_duration = 1.5
+    smooth_window = 3
 
-# Conditional smoothing parameters
-window_size = 3  # Applies if enough predictions
+class OptimizedAnalyzer:
+    def __init__(self, model_path):
+        self.model = self.load_model(model_path)
 
-# Auto-tuned threshold logic
-def auto_tune_threshold(max_prob):
-    if max_prob < 0.6:
-        return 0.35
-    elif max_prob < 0.8:
-        return 0.45
-    else:
-        return 0.5  # or user-specified
+    def load_model(self, model_path):
+        # Load and return the model
+        model = tf.keras.models.load_model(model_path)
+        print("Model loaded from:", model_path)
+        return model
 
-# Debugging mode
-def debug_statistics(predictions):
-    num_predictions = len(predictions)
-    min_prob = min(predictions) if predictions else 0
-    max_prob = max(predictions) if predictions else 0
-    avg_prob = sum(predictions) / len(predictions) if predictions else 0
-    tuned_threshold = auto_tune_threshold(max_prob)
-    print(f"Number of predictions: {num_predictions}")
-    print(f"Min probability: {min_prob}")
-    print(f"Max probability: {max_prob}")
-    print(f"Average probability: {avg_prob}")
-    print(f"Auto-tuned threshold: {tuned_threshold}")
+    def preprocess_frame(self, frame):
+        # Preprocess single frame for model
+        print("Preprocessing frame...")
+        return frame
 
-# Include all speed optimizations from working_optimized_extractor.py
-# Batch prediction, multithreading, adaptive skip, etc.
-# ... (remaining code logic with optimizations)
+    def preprocess_batch_parallel(self, frames):
+        # Preprocess a batch of frames in parallel
+        print("Preprocessing batch of frames...")
+        return frames
 
-# After scanning is complete, call the debug_statistics function
-# debug_statistics(prediction_values)
+    def scan_video_optimized(self, video_path):
+        print("Scanning video file:", video_path)
+        # Add scanning logic here
+
+class ClipExtractor:
+    def __init__(self, analyzer: OptimizedAnalyzer):
+        self.analyzer = analyzer
+
+    def auto_tune_threshold(self):
+        print("Auto-tuning threshold...")
+        # Logic for auto-tuning threshold
+
+    def detect_events(self, video_path):
+        print("Detecting events in video:", video_path)
+        # Logic for detecting events
+
+    def extract_clips(self, detected_events):
+        print("Extracting clips from detected events...")
+        # Logic to extract clips
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Optimized Clip Extractor')
+    parser.add_argument('--video', type=str, help='Path to the video file')
+    parser.add_argument('--model', type=str, help='Path to the model file')
+    args = parser.parse_args()
+
+    analyzer = OptimizedAnalyzer(args.model)
+    extractor = ClipExtractor(analyzer)
+    # Add main functionality here
+
+if __name__ == '__main__':
+    main()

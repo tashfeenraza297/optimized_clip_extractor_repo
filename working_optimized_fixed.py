@@ -1,64 +1,307 @@
+# =========================================================
+# OPTIMIZED WORKING EXTRACTOR - FIXED VERSION
+# Fixes: Better skip, auto-tune threshold, larger merge gap
+# =========================================================
 import cv2
 import numpy as np
+import os
 import tensorflow as tf
+from tensorflow.keras.models import load_model
+from concurrent.futures import ThreadPoolExecutor
+import argparse
+import time
+from tqdm import tqdm
 
 class Config:
-    initial_skip = 15
-    merge_gap = 6.0
-    min_event_duration = 1.5
-    smooth_window = 3
+    def __init__(self):
+        self.model_path = None
+        self.video_path = None
+        self.output_dir = None
+        self.detection_type = "accident"
+        
+        # FIXED PARAMETERS
+        self.batch_size = 32
+        self.num_threads = 4
+        self.initial_skip = 15  # REDUCED from 60 to 15 (0.5s)
+        self.dynamic_skip = 5
+        self.threshold = 0.5  # Will be auto-tuned
+        self.smooth_window = 3  # REDUCED from 5 to 3
+        self.min_event_duration = 1.5  # REDUCED from 2.0 to 1.5
+        self.merge_gap = 6.0  # INCREASED from 3.0 to 6.0
+        self.debug = True  # Enable debug output
 
 class OptimizedAnalyzer:
-    def __init__(self, model_path):
-        self.model = self.load_model(model_path)
-
-    def load_model(self, model_path):
-        # Load and return the model
-        model = tf.keras.models.load_model(model_path)
-        print("Model loaded from:", model_path)
-        return model
-
+    def __init__(self, config):
+        self.config = config
+        self.model = None
+        
+    def load_model(self):
+        print(f"[INFO] Loading {self.config.detection_type} detection model...")
+        tf.config.threading.set_intra_op_parallelism_threads(self.config.num_threads)
+        tf.config.threading.set_inter_op_parallelism_threads(self.config.num_threads)
+        
+        self.model = load_model(self.config.model_path, compile=False)
+        
+        # Warm up
+        dummy = np.random.rand(1, 299, 299, 3).astype(np.float32)
+        _ = self.model.predict(dummy, verbose=0)
+        print("[✓] Model loaded and optimized")
+        
     def preprocess_frame(self, frame):
-        # Preprocess single frame for model
-        print("Preprocessing frame...")
-        return frame
-
-    def preprocess_batch_parallel(self, frames):
-        # Preprocess a batch of frames in parallel
-        print("Preprocessing batch of frames...")
-        return frames
-
-    def scan_video_optimized(self, video_path):
-        print("Scanning video file:", video_path)
-        # Add scanning logic here
+        img = cv2.resize(frame, (299, 299))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        return img
+    
+def preprocess_batch_parallel(self, frames):
+        with ThreadPoolExecutor(max_workers=self.config.num_threads) as executor:
+            processed = list(executor.map(self.preprocess_frame, frames))
+        return np.array(processed)
+    
+def scan_video_optimized(self):
+        print(f"\n[SCAN] Starting optimized analysis...")
+        
+        cap = cv2.VideoCapture(self.config.video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        print(f"[INFO] Video: {total_frames} frames @ {fps:.1f} FPS")
+        print(f"[INFO] Batch size: {self.config.batch_size}")
+        print(f"[INFO] Initial skip: {self.config.initial_skip} frames (improved!)")
+        
+        all_probs = []
+        all_indices = []
+        frame_num = 0
+        skip = self.config.initial_skip;
+        
+        pbar = tqdm(total=total_frames, desc="Scanning", unit="frames")
+        
+        while frame_num < total_frames:
+            frames_to_process = []
+            frame_positions = []
+            
+            for _ in range(self.config.batch_size):
+                if frame_num >= total_frames:
+                    break;
+                
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read();
+                if not ret:
+                    break;
+                
+                frames_to_process.append(frame);
+                frame_positions.append(frame_num);
+                frame_num += skip;
+            
+            if not frames_to_process:
+                break;
+            
+            processed_batch = self.preprocess_batch_parallel(frames_to_process);
+            predictions = self.model.predict(processed_batch, verbose=0);
+            probs = predictions[:, 1];
+            
+            all_probs.extend(probs);
+            all_indices.extend(frame_positions);
+            
+            max_prob = np.max(probs);
+            skip = self.config.dynamic_skip if max_prob >= self.config.threshold else self.config.initial_skip;
+            
+            pbar.update(frame_positions[-1] - pbar.n);
+        
+        pbar.close();
+        cap.release();
+        
+        print(f"[✓] Scan complete: {len(all_probs)} predictions made");
+        
+        if self.config.debug and len(all_probs) > 0:
+            print(f"\n{'='*60}");
+            print("[DEBUG] PREDICTION STATISTICS:");
+            print(f"  Total predictions: {len(all_probs)}");
+            print(f"  Min probability: {np.min(all_probs):.3f}");
+            print(f"  Max probability: {np.max(all_probs):.3f}");
+            print(f"  Mean probability: {np.mean(all_probs):.3f}");
+            print(f"  Median probability: {np.median(all_probs):.3f}");
+            print(f"  Predictions > 0.5: {np.sum(np.array(all_probs) > 0.5)}");
+            print(f"  Predictions > 0.3: {np.sum(np.array(all_probs) > 0.3)}");
+            print(f"{'='*60}\n");
+        
+        return {
+            'probs': all_probs,
+            'indices': all_indices,
+            'fps': fps,
+            'total_frames': total_frames
+        }
 
 class ClipExtractor:
-    def __init__(self, analyzer: OptimizedAnalyzer):
-        self.analyzer = analyzer
-
-    def auto_tune_threshold(self):
-        print("Auto-tuning threshold...")
-        # Logic for auto-tuning threshold
-
-    def detect_events(self, video_path):
-        print("Detecting events in video:", video_path)
-        # Logic for detecting events
-
-    def extract_clips(self, detected_events):
-        print("Extracting clips from detected events...")
-        # Logic to extract clips
+    def __init__(self, config, scan_data):
+        self.config = config
+        self.scan_data = scan_data
+        self.fps = scan_data['fps'];
+        
+    def auto_tune_threshold(self, probs):
+        max_prob = np.max(probs);
+        
+        if max_prob < 0.6:
+            tuned = 0.35;
+            reason = "Low confidence video (max < 0.6)";
+        elif max_prob < 0.8:
+            tuned = 0.45;
+            reason = "Medium confidence video (max < 0.8)";
+        else:
+            tuned = self.config.threshold;
+            reason = "High confidence video";
+        
+        if self.config.debug:
+            print(f"[AUTO-TUNE] Original threshold: {self.config.threshold}");
+            print(f"[AUTO-TUNE] Tuned threshold: {tuned}");
+            print(f"[AUTO-TUNE] Reason: {reason}\n");
+        
+        return tuned;
+        
+    def detect_events(self):
+        probs = np.array(self.scan_data['probs']);
+        indices = self.scan_data['indices'];
+        
+        threshold = self.auto_tune_threshold(probs);
+        
+        if len(probs) >= 10:
+            smooth_probs = np.convolve(
+                probs, 
+                np.ones(self.config.smooth_window) / self.config.smooth_window,
+                mode='same'
+            );
+            if self.config.debug:
+                print(f"[SMOOTH] Applied smoothing (window={self.config.smooth_window})");
+        else:
+            smooth_probs = probs;
+            if self.config.debug:
+                print(f"[SMOOTH] Skipped smoothing (too few predictions: {len(probs)})");
+        
+        events = [];
+        start = None;
+        min_frames = int(self.config.min_event_duration * self.fps);
+        
+        for i, prob in enumerate(smooth_probs):
+            if prob >= threshold and start is None:
+                start = indices[i];
+            elif prob < threshold and start is not None:
+                end = indices[i];
+                if (end - start) >= min_frames:
+                    events.append((start, end));
+                start = None;
+        
+        if start is not None:
+            events.append((start, indices[-1]));
+        
+        merge_gap_frames = int(self.config.merge_gap * self.fps);
+        merged_events = [];
+        
+        for s, e in events:
+            if not merged_events or s - merged_events[-1][1] > merge_gap_frames:
+                merged_events.append([s, e]);
+            else:
+                merged_events[-1][1] = e;
+        
+        events = [tuple(e) for e in merged_events];
+        
+        print(f"[✓] Detected {len(events)} event(s)");
+        
+        if self.config.debug and len(events) > 0:
+            print(f"\n[DEBUG] EVENT DETAILS:");
+            for idx, (s, e) in enumerate(events):
+                duration = (e - s) / self.fps;
+                print(f"  Event {idx+1}: {s/self.fps:.1f}s - {e/self.fps:.1f}s (Duration: {duration:.1f}s)");
+            print();
+        
+        return events;
+    
+def extract_clips(self, events, mode_name):
+        if not events:
+            print(f"[INFO] No {self.config.detection_type} events detected");
+            return;
+        
+        print(f"\n[EXTRACT] {mode_name.upper()} Mode: {len(events)} event(s)");
+        
+        cap = cv2.VideoCapture(self.config.video_path);
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH));
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT));
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v');
+        
+        for idx, (start, end) in enumerate(events):
+            clip_filename = f"{mode_name.upper()}_{self.config.detection_type}_{idx+1}.mp4";
+            clip_path = os.path.join(self.config.output_dir, clip_filename);
+            
+            out = cv2.VideoWriter(clip_path, fourcc, self.fps, (frame_width, frame_height));
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start);
+            
+            frames_written = 0;
+            for frame_idx in range(start, end + 1):
+                ret, frame = cap.read();
+                if not ret:
+                    break;
+                out.write(frame);
+                frames_written += 1;
+            
+            out.release();
+            
+            duration = frames_written / self.fps;
+            start_time = start / self.fps;
+            end_time = end / self.fps;
+            
+            print(f"  [✓] Clip {idx+1}: {start_time:.1f}s - {end_time:.1f}s (Duration: {duration:.1f}s) → {clip_filename}");
+        
+        cap.release();
+        print("[✓] All clips extracted\n");
 
 def main():
-    import argparse
+    parser = argparse.ArgumentParser(description='Optimized Working Clip Extractor - FIXED')
+    parser.add_argument('--model', type=str, required=True, help='Path to detection model')
+    parser.add_argument('--video', type=str, required=True, help='Path to input video')
+    parser.add_argument('--output', type=str, required=True, help='Output directory')
+    parser.add_argument('--type', type=str, default='accident', choices=['accident', 'fire'])
+    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--no-debug', action='store_true', help='Disable debug output')
+    
+    args = parser.parse_args();
+    
+    config = Config();
+    config.model_path = args.model;
+    config.video_path = args.video;
+    config.output_dir = args.output;
+    config.detection_type = args.type;
+    config.batch_size = args.batch_size;
+    config.threshold = args.threshold;
+    config.debug = not args.no_debug;
+    
+    os.makedirs(config.output_dir, exist_ok=True);
+    
+    print("="*60);
+    print(" OPTIMIZED WORKING EXTRACTOR - FIXED VERSION");
+    print("="*60);
+    print(f"Video: {config.video_path}");
+    print(f"Detection: {config.detection_type.upper()}");
+    print(f"Threshold: {config.threshold} (will auto-tune)");
+    print(f"Initial skip: {config.initial_skip} frames (0.5s)");
+    print(f"Merge gap: {config.merge_gap}s");
+    print(f"Min duration: {config.min_event_duration}s");
+    print("="*60);
+    
+    start_time = time.time();
+    
+    analyzer = OptimizedAnalyzer(config);
+    analyzer.load_model();
+    scan_data = analyzer.scan_video_optimized();
+    
+    extractor = ClipExtractor(config, scan_data);
+    events = extractor.detect_events();
+    extractor.extract_clips(events, 'FIXED');
+    
+    elapsed = time.time() - start_time;
+    
+    print("="*60);
+    print(f"[COMPLETE] Total time: {elapsed:.2f} seconds");
+    print(f"[OUTPUT] Clips saved to: {config.output_dir}");
+    print("="*60);
 
-    parser = argparse.ArgumentParser(description='Optimized Clip Extractor')
-    parser.add_argument('--video', type=str, help='Path to the video file')
-    parser.add_argument('--model', type=str, help='Path to the model file')
-    args = parser.parse_args()
-
-    analyzer = OptimizedAnalyzer(args.model)
-    extractor = ClipExtractor(analyzer)
-    # Add main functionality here
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
